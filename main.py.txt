@@ -1,46 +1,15 @@
 import os
 from fastapi import FastAPI
-from psycopg import connect
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy import text
 
-app = FastAPI(title="IoT Waste API")
+app = FastAPI()
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
-
-def db():
-    return connect(DATABASE_URL)
+db_url = os.environ["DATABASE_URL"].replace("postgresql://", "postgresql+asyncpg://", 1)
+engine = create_async_engine(db_url, pool_pre_ping=True)
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
-
-@app.get("/trucks/current")
-def trucks_current():
-    sql = """
-    SELECT
-      t.id AS truck_id,
-      t.name AS truck_name,
-      v.time,
-      v.geom_geojson
-    FROM sensorthings.v_truck_current_position v
-    JOIN sensorthings.things t ON t.id = v.thing_id
-    WHERE (t.properties->>'type') = 'truck'
-    ORDER BY t.id;
-    """
-    with db() as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
-            rows = cur.fetchall()
-
-    # Retour GeoJSON pour Leaflet
-    features = []
-    for truck_id, truck_name, time, geom in rows:
-        features.append({
-            "type": "Feature",
-            "geometry": geom,
-            "properties": {
-                "truck_id": truck_id,
-                "truck_name": truck_name,
-                "time": str(time)
-            }
-        })
-    return {"type": "FeatureCollection", "features": features}
+async def health():
+    async with engine.connect() as conn:
+        v = (await conn.execute(text("SELECT 1"))).scalar_one()
+    return {"ok": True, "db": v}
